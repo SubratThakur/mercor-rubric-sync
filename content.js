@@ -41,6 +41,8 @@
   const CONFIG = {
     stepDelay: 350,            // ms between scripted UI actions (React re-render)
     sectionTitleIncludes: 'build rubric',
+    promptTitleIncludes: 'write prompt',
+    goldenTitleIncludes: 'write golden answer',
     categoryLabels: {          // category key -> heading text in the editor
       reasoning: 'Reasoning',
       completeness: 'Completeness',
@@ -145,17 +147,13 @@
     LOG(msg);
   }
 
-  // ----------------------- section / row discovery ------------------------
-  // The whole "Step 3 · Build Rubric" card (header + collapsible content).
-  function getRubricCard() {
-    const headers = [...document.querySelectorAll('div, span')];
-    const titleSpan = headers.find(
-      (n) =>
-        n.children.length === 0 &&
-        norm(n.textContent).includes(CONFIG.sectionTitleIncludes)
+  // ----------------------- section / card discovery -----------------------
+  // The bordered card whose collapsible header <span> text includes `titleSub`.
+  function getCardByTitle(titleSub) {
+    const titleSpan = [...document.querySelectorAll('div, span')].find(
+      (n) => n.children.length === 0 && norm(n.textContent).includes(titleSub)
     );
     if (!titleSpan) return null;
-    // climb to the bordered card container
     let el = titleSpan;
     for (let i = 0; i < 6 && el; i++) {
       if (el.matches('.border.rounded-lg, [class*="rounded-lg"]')) return el;
@@ -164,26 +162,45 @@
     return titleSpan.closest('div');
   }
 
-  function getRubricHeader() {
-    const card = getRubricCard();
+  // The clickable collapsible header bar inside a card.
+  function getCardHeader(card, titleSub) {
     if (!card) return null;
     return (
       [...card.querySelectorAll('div')].find(
         (d) =>
           d.querySelector('span') &&
-          norm(d.querySelector('span').textContent).includes(
-            CONFIG.sectionTitleIncludes
-          ) &&
+          norm(d.querySelector('span').textContent).includes(titleSub) &&
           d.className.includes('cursor-pointer')
       ) || card.firstElementChild
     );
   }
 
-  // Make sure the collapsible content is open before we operate on it.
+  // Expand a card if its collapsible content (a textarea) isn't rendered yet.
+  async function ensureCardExpanded(card, titleSub) {
+    if (!card) return false;
+    if (!card.querySelector('textarea')) {
+      const header = getCardHeader(card, titleSub);
+      if (header) {
+        header.click();
+        await sleep(CONFIG.stepDelay);
+      }
+    }
+    return true;
+  }
+
+  // The whole "Step 3 · Build Rubric" card (header + collapsible content).
+  function getRubricCard() {
+    return getCardByTitle(CONFIG.sectionTitleIncludes);
+  }
+
+  function getRubricHeader() {
+    return getCardHeader(getRubricCard(), CONFIG.sectionTitleIncludes);
+  }
+
+  // Make sure the Build Rubric collapsible is open before we operate on it.
   async function ensureExpanded() {
     const card = getRubricCard();
     if (!card) return false;
-    // Heuristic: if the card has no textareas / add button visible, it's collapsed.
     const hasContent =
       card.querySelector('textarea') ||
       [...card.querySelectorAll('button')].some((b) =>
@@ -645,6 +662,68 @@
     a.remove();
   }
 
+  // --------------------- import Prompt / Golden Answer --------------------
+  // Read a text/markdown file (read-only — no write-back needed here).
+  async function pickTextFile() {
+    if (window.showOpenFilePicker) {
+      const [handle] = await window.showOpenFilePicker({
+        types: [
+          {
+            description: 'Markdown / text',
+            accept: {
+              'text/markdown': ['.md', '.markdown'],
+              'text/plain': ['.txt'],
+            },
+          },
+        ],
+        multiple: false,
+      });
+      const file = await handle.getFile();
+      return file.text();
+    }
+    return new Promise((resolve, reject) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.md,.markdown,.txt,text/markdown,text/plain';
+      input.onchange = () => {
+        const f = input.files[0];
+        if (!f) return reject(new Error('no file'));
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(f);
+      };
+      input.click();
+    });
+  }
+
+  // Load a .md file and drop its contents into the card's single textarea.
+  async function importTextIntoCard(titleSub, friendlyName) {
+    const card = getCardByTitle(titleSub);
+    if (!card) {
+      toast(`! ${friendlyName} section not found on this page`, 'rs-row-err');
+      return;
+    }
+    let text;
+    try {
+      text = await pickTextFile();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user cancelled
+      toast('! could not read file: ' + e.message, 'rs-row-err');
+      return;
+    }
+    await ensureCardExpanded(card, titleSub);
+    const ta = card.querySelector('textarea[data-slot="textarea"]') ||
+      card.querySelector('textarea');
+    if (!ta) {
+      toast(`! no text field found in ${friendlyName}`, 'rs-row-err');
+      return;
+    }
+    setNativeValue(ta, text);
+    toast(`✔ ${friendlyName} imported (${text.length} chars). Review & Save.`, 'rs-row-ok');
+    scheduleAutoClose(5000);
+  }
+
   // If automatic write-back fails (e.g. activation expired), give the user a
   // button to save with a fresh click, plus a plain download fallback.
   function offerManualSave(handle, payload) {
@@ -848,10 +927,37 @@
     LOG('buttons injected');
   }
 
+  // Inject a single "import from .md" button into a card's collapsible header.
+  function injectTextImportButton(btnId, titleSub, label, friendlyName) {
+    if (document.getElementById(btnId)) return;
+    const card = getCardByTitle(titleSub);
+    if (!card) return;
+    const header = getCardHeader(card, titleSub);
+    if (!header) return;
+    const btn = makeActionButton(btnId, label, `Load a .md file into ${friendlyName}`,
+      () => importTextIntoCard(titleSub, friendlyName));
+    const right = header.querySelector('div.flex.items-center.gap-2') || header;
+    right.insertBefore(btn, right.firstChild);
+    LOG(`${friendlyName} import button injected`);
+  }
+
   // ---------------------- observe SPA navigation --------------------------
   const tick = () => {
+    if (!location.pathname.includes('/annotator/tasks/')) return;
     try {
       injectButton();
+      injectTextImportButton(
+        'prompt-import-btn',
+        CONFIG.promptTitleIncludes,
+        '⤓ Import Prompt',
+        'Prompt'
+      );
+      injectTextImportButton(
+        'golden-import-btn',
+        CONFIG.goldenTitleIncludes,
+        '⤓ Import Golden',
+        'Golden Answer'
+      );
     } catch (e) {
       /* ignore */
     }

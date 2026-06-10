@@ -5,12 +5,20 @@ from a JSON file** on Mercor Studio task pages
 (`https://studio.mercor.com/annotator/tasks/<id>`), instead of clicking through
 the UI one criterion at a time.
 
-It adds two buttons to the *Step 3 · Build Rubric* section header:
+It adds buttons to the Build Rubric, Prompt, and Golden Answer sections:
 
-- **⤒ Export Rubric** — saves the current rubric as JSON grouped by category:
-  `{ "reasoning": [...], "completeness": [...], "style": [...] }`.
-- **⤓ Import Rubric** — loads a JSON file and reconciles it against the page
-  (add / update / delete), then writes the file back so it mirrors the browser.
+- *Step 3 · Build Rubric* header:
+  - **⤒ Export Rubric** — saves the current rubric as JSON grouped by category:
+    `{ "reasoning": [...], "completeness": [...], "style": [...] }`.
+  - **⤓ Import Rubric** — loads a JSON file and reconciles it against the page
+    (add / update / delete), then writes the file back so it mirrors the browser.
+- *Step 1 · Write Prompt* header → **⤓ Import Prompt** — loads a `.md`/`.txt`
+  file into the Prompt textarea.
+- *Step 2 · Write Golden Answer* header → **⤓ Import Golden** — loads a
+  `.md`/`.txt` file into the Golden Answer textarea.
+
+Prompt/Golden imports fill the field via React's native setter (so changes
+register); review and **Save Changes** yourself.
 
 ---
 
@@ -86,7 +94,9 @@ A single content script, injected into the page's **MAIN world** (so it can use
 React's native input setter and the File System Access API directly).
 
 ```
-manifest.json   MV3 config — runs content.js on studio.mercor.com/annotator/tasks/*
+manifest.json   MV3 config — injects content.js across studio.mercor.com/annotator/*
+                (so it survives SPA navigation from the writer-queue into a task);
+                the script itself only acts on /annotator/tasks/ pages
 content.js      all logic (see flow below)
 styles.css      button + status-panel styling
 sample-rubric.json   example input
