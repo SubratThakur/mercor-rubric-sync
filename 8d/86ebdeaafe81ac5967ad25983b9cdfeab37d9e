@@ -1,0 +1,27 @@
+README.md
+  s_1ad261199a34eb::t_c4136e7478888e 97-99
+  s_1ad261199a34eb::t_ab0321054fc4c2 8,10-21
+manifest.json
+  s_1ad261199a34eb::t_a6e0dc5d0f1c00 8
+content.js
+  s_1ad261199a34eb::t_ef74257a6ac80f 665-726
+  s_1ad261199a34eb::t_c48287ca1eb6a7 930-943,946,949-960
+  s_1ad261199a34eb::t_dcc41cdbeed9ee 44-45
+  s_1ad261199a34eb::t_5f34a3b08644f3 150-154,165-166,172,178-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8d86ebdeaafe81ac5967ad25983b9cdfeab37d9e",
+  "prompts": {},
+  "sessions": {
+    "s_1ad261199a34eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a631b210-3074-4808-bb8b-923adbf1ecdb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Subrat Thakur <sthakur@makenotion.com>"
+    }
+  }
+}
