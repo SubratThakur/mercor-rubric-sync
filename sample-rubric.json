@@ -1,0 +1,23 @@
+[
+  {
+    "id": "reasoning-5ayacj",
+    "category": "reasoning",
+    "description": "Identifies that the LiveQuery notification originates from RestWrite.runAfterSaveTrigger (the afterSave step), i.e. after the database write, via liveQueryController.onAfterSave",
+    "rationale": "This is the true emission point in the write pipeline.",
+    "weight": "critical"
+  },
+  {
+    "id": "completeness-knjbr7",
+    "category": "completeness",
+    "description": "Includes both the transport/emission path and the per-client event-classification logic",
+    "rationale": "Both halves are required for a complete answer.",
+    "weight": "critical"
+  },
+  {
+    "id": "style-g8xw68",
+    "category": "style",
+    "description": "Uses exact identifiers (runAfterSaveTrigger, ParseCloudCodePublisher, ParsePubSub, _onAfterSave) when describing the flow",
+    "rationale": "Concrete identifiers show real familiarity with the codebase.",
+    "weight": "bonus"
+  }
+]

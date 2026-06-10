@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Mercor Studio — Rubric Sync",
+  "version": "1.0.0",
+  "description": "Adds a Sync Rubric button to the Build Rubric section of Mercor Studio task pages. Loads a JSON file, updates/adds/deletes criteria by id, and writes the synced ids back to the file.",
+  "content_scripts": [
+    {
+      "matches": ["https://studio.mercor.com/annotator/tasks/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}
