@@ -1,0 +1,19 @@
+manifest.json
+  s_1ad261199a34eb::t_1ab8218b6007cd 6-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "87578f54c8bf571c0f6e8a87b77e1386ce434dbf",
+  "prompts": {},
+  "sessions": {
+    "s_1ad261199a34eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a631b210-3074-4808-bb8b-923adbf1ecdb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Subrat Thakur <sthakur@makenotion.com>"
+    }
+  }
+}
