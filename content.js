@@ -43,6 +43,7 @@
     sectionTitleIncludes: 'build rubric',
     promptTitleIncludes: 'write prompt',
     goldenTitleIncludes: 'write golden answer',
+    verifierTitleIncludes: 'verifier judge results',
     categoryLabels: {          // category key -> heading text in the editor
       reasoning: 'Reasoning',
       completeness: 'Completeness',
@@ -69,6 +70,20 @@
   const LOG = (...a) => console.log('[RubricSync]', ...a);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  // While we're scripting the page (import/export), the DOM churns heavily and
+  // React is mid-reconcile. Pause our MutationObserver-driven injectors during
+  // that window so we never insert nodes into a subtree React is rebuilding
+  // (which trips its error boundary / "An error occurred").
+  let busy = false;
+  async function withBusy(fn) {
+    busy = true;
+    try {
+      return await fn();
+    } finally {
+      busy = false;
+    }
+  }
 
   // ------------------------- React-safe value setter ----------------------
   function setNativeValue(el, value) {
@@ -622,7 +637,7 @@
   }
 
   async function exportAndSave() {
-    await ensureExpanded();
+    await withBusy(() => ensureExpanded());
     const grouped = exportRubric();
     const count = Object.values(grouped).reduce((n, a) => n + a.length, 0);
     const payload = JSON.stringify(grouped, null, 2);
@@ -724,6 +739,315 @@
     scheduleAutoClose(5000);
   }
 
+  // ------------------- copy Verifier Judge Results as JSON ----------------
+  function getVerifierCard() {
+    return getCardByTitle(CONFIG.verifierTitleIncludes);
+  }
+
+  // Label text of a verifier tab trigger (just the leading name span, not the
+  // score span that follows it).
+  function tabLabel(trig) {
+    if (!trig) return '';
+    const span = trig.querySelector('span');
+    return (span ? span.textContent : trig.textContent).trim();
+  }
+
+  // Name of the currently-selected results tab (e.g. "Model response").
+  function activeVerifierTab(card) {
+    return tabLabel(card.querySelector('[role="tab"][data-state="active"]'));
+  }
+
+  // Expand the verifier card if its tabs/results aren't rendered yet. (Unlike
+  // the rubric/prompt cards it has no <textarea>, so the generic
+  // ensureCardExpanded would wrongly toggle an already-open card shut.)
+  async function ensureVerifierExpanded(card) {
+    if (!card) return false;
+    if (!card.querySelector('[role="tab"], [role="tabpanel"]')) {
+      const header = getCardHeader(card, CONFIG.verifierTitleIncludes);
+      if (header) {
+        header.click();
+        await sleep(CONFIG.stepDelay);
+      }
+    }
+    return true;
+  }
+
+  // All result tabs in the verifier card: [{ el, name }].
+  function getVerifierTabs(card) {
+    return [...card.querySelectorAll('[role="tab"]')].map((el) => ({
+      el,
+      name: tabLabel(el),
+    }));
+  }
+
+  // Make `nameSub` the active tab (radix unmounts inactive panels, so we must
+  // switch before scraping). Returns true once its panel is rendered.
+  async function selectVerifierTab(card, nameSub) {
+    if (!nameSub) return true;
+    const want = nameSub.toLowerCase();
+    const tab = getVerifierTabs(card).find((t) =>
+      t.name.toLowerCase().includes(want)
+    );
+    if (!tab) return false;
+    if (tab.el.getAttribute('data-state') === 'active') return true;
+    tab.el.click();
+    for (let i = 0; i < 20; i++) {
+      await sleep(50);
+      if (tab.el.getAttribute('data-state') === 'active') return true;
+    }
+    return tab.el.getAttribute('data-state') === 'active';
+  }
+
+  // The active tab's result panel (whichever radix has mounted).
+  function activeVerifierPanel(card) {
+    return (
+      card.querySelector('[role="tabpanel"][data-state="active"]') ||
+      card.querySelector('[role="tabpanel"]:not([hidden])')
+    );
+  }
+
+  // The verifier list is the .space-y-2 whose cards carry a font-mono <p> id
+  // (this skips the "Model response" preview block above it).
+  function verifierListIn(panel) {
+    if (!panel) return null;
+    const lists = [...panel.querySelectorAll('.space-y-2')];
+    return lists.find((l) => l.querySelector('p[class*="font-mono"]')) || null;
+  }
+
+  // After a tab switch the page re-renders the panel asynchronously. Wait until
+  // the active panel actually shows verifier result rows before scraping, so we
+  // don't race the app mid-render (which can blank the panel / error it out).
+  async function waitForVerifierResults(card) {
+    for (let i = 0; i < 60; i++) {
+      const panel = activeVerifierPanel(card);
+      const list = verifierListIn(panel);
+      if (list && list.querySelector('[class*="rounded-md"][class*="border"]')) {
+        return true;
+      }
+      await sleep(50);
+    }
+    return false;
+  }
+
+  // Scrape the active tab's verifier result cards into structured objects.
+  function scrapeVerifierResults(card, onlyFailed) {
+    const panel = activeVerifierPanel(card);
+    if (!panel) return null;
+    const lists = [...panel.querySelectorAll('.space-y-2')];
+    let container = verifierListIn(panel);
+    container = container || lists[lists.length - 1];
+    if (!container) return null;
+
+    const results = [];
+    for (const c of container.children) {
+      if (!c.matches || !c.matches('[class*="rounded-md"][class*="border"]')) continue;
+      const badges = [...c.querySelectorAll('[data-slot="badge"]')];
+      const idEl = c.querySelector('p[class*="font-mono"]');
+      const scoreEl = c.querySelector('span[class*="font-mono"]');
+      const critEl = c.querySelector('[class*="line-clamp-2"]');
+      const explEl = c.querySelector('[class*="line-clamp-3"]');
+      const id = idEl ? idEl.textContent.trim() : null;
+      const criterion = critEl ? critEl.textContent.trim() : '';
+      if (!id && !criterion) continue; // not a verifier row
+      results.push({
+        id,
+        status: badges[0] ? norm(badges[0].textContent) : '',
+        weight: badges[1] ? norm(badges[1].textContent) : '',
+        score: scoreEl ? scoreEl.textContent.trim() : '',
+        criterion,
+        explanation: explEl ? explEl.textContent.trim() : '',
+      });
+    }
+    const filtered = onlyFailed
+      ? results.filter((r) => r.status === 'fail')
+      : results;
+    return { tab: activeVerifierTab(card), count: filtered.length, results: filtered };
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+
+  async function copyVerifierJSON(onlyFailed, tabName) {
+    const card = getVerifierCard();
+    if (!card) {
+      toast('! Verifier Judge Results section not found', 'rs-row-err');
+      return;
+    }
+    await ensureVerifierExpanded(card);
+    if (tabName) {
+      const wasActive = getVerifierTabs(card).some(
+        (t) =>
+          t.name.toLowerCase().includes(tabName.toLowerCase()) &&
+          t.el.getAttribute('data-state') === 'active'
+      );
+      const ok = await selectVerifierTab(card, tabName);
+      if (!ok) {
+        toast(`! "${tabName}" tab not found`, 'rs-row-err');
+        return;
+      }
+      // If we just switched tabs, let the panel finish rendering its results
+      // before scraping (avoids racing the app mid-render).
+      if (!wasActive) {
+        toast(`… loading "${tabName}" results`, 'rs-row-warn');
+        await waitForVerifierResults(card);
+      }
+    } else {
+      await waitForVerifierResults(card);
+    }
+    const data = scrapeVerifierResults(card, onlyFailed);
+    if (!data || !data.results.length) {
+      toast(
+        onlyFailed ? '! no failed verifiers in this tab' : '! no verifier results found',
+        'rs-row-warn'
+      );
+      return;
+    }
+    const ok = await copyToClipboard(JSON.stringify(data, null, 2));
+    if (ok) {
+      toast(
+        `✔ Copied ${data.results.length} ${onlyFailed ? 'failed ' : ''}result(s) from "${data.tab}" as JSON.`,
+        'rs-row-ok'
+      );
+      scheduleAutoClose(5000);
+    } else {
+      toast('! clipboard copy failed', 'rs-row-err');
+    }
+  }
+
+  // ------------------- copy review-panel results -------------------------
+  // "Rubric Review" and "Golden Answer Review" share the same shape: a
+  // .rounded-md.border with a collapsible header button + a Run button, and a
+  // <pre> holding the grading output ending in "FINAL_SCORE: NN".
+  const REVIEW_PANELS = [
+    {
+      key: 'rubric-review',
+      title: 'rubric review',
+      friendly: 'Rubric Review',
+      max: 40,
+      // <35 red, 35–38 yellow, 39–40 green.
+      tier: (s) => (s < 35 ? 'red' : s < 39 ? 'yellow' : 'green'),
+    },
+    {
+      key: 'golden-answer-review',
+      title: 'golden answer review',
+      friendly: 'Golden Answer Review',
+      max: 25,
+      // <24 red, 24 yellow, 25 green.
+      tier: (s) => (s < 24 ? 'red' : s < 25 ? 'yellow' : 'green'),
+    },
+  ];
+
+  // Last-seen output per panel, so the score badge + Copy button persist even
+  // when the panel is collapsed (the page unmounts the <pre> while minimized).
+  // Cleared when the task changes (see reviewTaskKey below).
+  let reviewCache = {};
+  let reviewTaskKey = '';
+
+  // Reset the cache when navigating to a different task, so a collapsed panel
+  // never shows the previous task's stale score.
+  function syncReviewTask() {
+    const key = location.pathname;
+    if (key !== reviewTaskKey) {
+      reviewTaskKey = key;
+      reviewCache = {};
+    }
+  }
+
+  function getReviewCard(titleNorm) {
+    const label = [...document.querySelectorAll('div, span')].find(
+      (n) => n.children.length === 0 && norm(n.textContent) === titleNorm
+    );
+    if (!label) return null;
+    return label.closest('.rounded-md.border') || label.closest('div');
+  }
+
+  // Parse "FINAL_SCORE: NN" out of a review output.
+  function parseFinalScore(text) {
+    const m = /FINAL_SCORE:\s*(-?\d+(?:\.\d+)?)/i.exec(text || '');
+    return m ? parseFloat(m[1]) : null;
+  }
+
+  async function copyReviewResult(panel) {
+    // Prefer the live <pre>; fall back to the cached result (panel minimized).
+    let text = '';
+    const card = getReviewCard(panel.title);
+    if (card) {
+      const pre = card.querySelector('pre');
+      if (pre) text = pre.textContent.trim();
+    }
+    if (!text && reviewCache[panel.key]) text = reviewCache[panel.key].text;
+    if (!text) {
+      toast(`! no ${panel.friendly} output yet — click Run first`, 'rs-row-warn');
+      return;
+    }
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      toast(`✔ Copied ${panel.friendly} result.`, 'rs-row-ok');
+      scheduleAutoClose(5000);
+    } else {
+      toast('! clipboard copy failed', 'rs-row-err');
+    }
+  }
+
+  // ------------------- copy QC Feedback ----------------------------------
+  // The "QC Feedback" card is a .border.rounded-lg with a collapsible header
+  // and reviewer-note paragraphs in its body.
+  function getQcCard() {
+    const label = [...document.querySelectorAll('span, div')].find(
+      (n) => n.children.length === 0 && norm(n.textContent) === 'qc feedback'
+    );
+    if (!label) return null;
+    return label.closest('.border.rounded-lg') || label.closest('div');
+  }
+
+  // Joined text of the feedback body (labels + notes, preserving line breaks).
+  function qcText(card) {
+    const header = card.querySelector('.cursor-pointer');
+    const body = header ? header.nextElementSibling : null;
+    const scope = body || card;
+    const paras = [...scope.querySelectorAll('p')];
+    if (paras.length) {
+      return paras.map((p) => p.textContent.trim()).filter(Boolean).join('\n').trim();
+    }
+    return scope.textContent.trim();
+  }
+
+  async function copyQcFeedback() {
+    let text = '';
+    const card = getQcCard();
+    if (card) text = qcText(card);
+    if (!text && reviewCache['qc-feedback']) text = reviewCache['qc-feedback'].text;
+    if (!text) {
+      toast('! no QC Feedback to copy', 'rs-row-warn');
+      return;
+    }
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      toast('✔ Copied QC Feedback.', 'rs-row-ok');
+      scheduleAutoClose(5000);
+    } else {
+      toast('! clipboard copy failed', 'rs-row-err');
+    }
+  }
+
   // If automatic write-back fails (e.g. activation expired), give the user a
   // button to save with a fresh click, plus a plain download fallback.
   function offerManualSave(handle, payload) {
@@ -809,7 +1133,7 @@
       );
       return;
     }
-    await sync(items, fileHandle, shape);
+    await withBusy(() => sync(items, fileHandle, shape));
   }
 
   // Accept a flat array, { criteria: [...] }, or a grouped object keyed by
@@ -879,13 +1203,7 @@
   }
 
   // ----------------------------- button inject ----------------------------
-  function makeActionButton(id, label, title, handler) {
-    const btn = document.createElement('button');
-    btn.id = id;
-    btn.className = 'rubric-action-btn';
-    btn.type = 'button';
-    btn.textContent = label;
-    btn.title = title;
+  function wireButtonHandler(btn, handler) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation(); // don't toggle the collapsible
       e.preventDefault();
@@ -898,6 +1216,33 @@
         btn.disabled = false;
       }
     });
+  }
+
+  function makeActionButton(id, label, title, handler) {
+    const btn = document.createElement('button');
+    btn.id = id;
+    btn.className = 'rubric-action-btn';
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.title = title;
+    wireButtonHandler(btn, handler);
+    return btn;
+  }
+
+  // An icon-only Copy button matching Studio's native copy buttons.
+  const COPY_ICON_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy h-3.5 w-3.5" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+
+  function makeIconCopyButton(id, title, handler) {
+    const btn = document.createElement('button');
+    btn.id = id;
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Copy');
+    btn.title = title;
+    btn.className =
+      'inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-background hover:text-foreground opacity-60 hover:opacity-100 transition-opacity';
+    btn.innerHTML = COPY_ICON_SVG;
+    wireButtonHandler(btn, handler);
     return btn;
   }
 
@@ -927,6 +1272,135 @@
     LOG('buttons injected');
   }
 
+  // Inject a simple copy icon into the Verifier header that copies the
+  // currently open tab's results as JSON.
+  function injectVerifierCopyControl() {
+    if (document.getElementById('verifier-copy-btn')) return;
+    const card = getVerifierCard();
+    if (!card) return;
+    const header = getCardHeader(card, CONFIG.verifierTitleIncludes);
+    if (!header) return;
+    // Wait until the result tabs are present before injecting.
+    if (!getVerifierTabs(card).some((t) => t.name)) return;
+    const right = header.querySelector('div.flex.items-center.gap-2') || header;
+
+    const btn = makeIconCopyButton(
+      'verifier-copy-btn',
+      "Copy the open tab's verifier results as JSON",
+      () => copyVerifierJSON(false)
+    );
+    right.insertBefore(btn, right.firstChild);
+    LOG('verifier copy control injected');
+  }
+
+  // Inject a "Copy" button + a live score badge into a review panel's header,
+  // and tint the result area by score tier. Re-run each tick so the badge/tint
+  // refresh after the review is (re-)run. Idempotent per panel.
+  function injectReviewControls(panel) {
+    const copyId = `${panel.key}-copy-btn`;
+    const scoreId = `${panel.key}-score`;
+    const card = getReviewCard(panel.title);
+    if (!card) return;
+    const toolbar =
+      card.querySelector('div.flex.items-center.gap-2.px-3') ||
+      card.querySelector('div.flex.items-center.gap-2');
+    if (!toolbar) return;
+
+    const pre = card.querySelector('pre');
+    const liveText = pre ? pre.textContent.trim() : '';
+    // Cache the latest live result; reuse it while the panel is minimized.
+    if (liveText) reviewCache[panel.key] = { text: liveText };
+    const cached = reviewCache[panel.key];
+    const text = liveText || (cached ? cached.text : '');
+
+    const copyBtn = document.getElementById(copyId);
+    const badge = document.getElementById(scoreId);
+    const clearTint = () => {
+      if (pre) pre.classList.remove('rs-score-red', 'rs-score-yellow', 'rs-score-green');
+    };
+
+    // Never had a result for this task: tear down our additions.
+    if (!text) {
+      if (copyBtn) copyBtn.remove();
+      if (badge) badge.remove();
+      clearTint();
+      return;
+    }
+
+    // There is a result → show the Copy button.
+    if (!copyBtn) {
+      const btn = makeIconCopyButton(
+        copyId,
+        `Copy the ${panel.friendly} result`,
+        () => copyReviewResult(panel)
+      );
+      toolbar.insertBefore(btn, toolbar.firstChild);
+      LOG(`${panel.friendly} copy button injected`);
+    }
+
+    // Score badge + result tint — only when a FINAL_SCORE is present.
+    const score = parseFinalScore(text);
+    if (score == null) {
+      if (badge) badge.remove();
+      clearTint();
+      return;
+    }
+
+    const tier = panel.tier(score);
+    const tierClass = `rs-score-${tier}`;
+    const label = `Score: ${score}/${panel.max}`;
+    let b = badge;
+    if (!b) {
+      b = document.createElement('span');
+      b.id = scoreId;
+      b.className = 'rubric-score-badge';
+      toolbar.insertBefore(b, toolbar.firstChild);
+    }
+    // Only touch the DOM when something actually changed — the MutationObserver
+    // re-fires tick() on any childList change, so an unconditional textContent
+    // write would loop and freeze the page.
+    if (b.textContent !== label) b.textContent = label;
+    if (!b.classList.contains(tierClass)) {
+      b.classList.remove('rs-score-red', 'rs-score-yellow', 'rs-score-green');
+      b.classList.add(tierClass);
+    }
+    if (pre && !pre.classList.contains(tierClass)) {
+      pre.classList.remove('rs-score-red', 'rs-score-yellow', 'rs-score-green');
+      pre.classList.add(tierClass);
+    }
+  }
+
+  // Inject an icon Copy button into the QC Feedback header. Cached per task so
+  // it survives the panel being collapsed.
+  function injectQcFeedbackCopy() {
+    const card = getQcCard();
+    if (!card) return;
+    const header = card.querySelector('.cursor-pointer');
+    const toolbar =
+      (header && header.querySelector('div.flex.items-center.gap-2')) || header;
+    if (!toolbar) return;
+
+    const liveText = qcText(card);
+    if (liveText) reviewCache['qc-feedback'] = { text: liveText };
+    const cached = reviewCache['qc-feedback'];
+    const text = liveText || (cached ? cached.text : '');
+
+    const btn = document.getElementById('qc-feedback-copy-btn');
+    if (!text) {
+      if (btn) btn.remove();
+      return;
+    }
+    if (!btn) {
+      const b = makeIconCopyButton(
+        'qc-feedback-copy-btn',
+        'Copy the QC Feedback',
+        copyQcFeedback
+      );
+      toolbar.insertBefore(b, toolbar.firstChild);
+      LOG('QC feedback copy button injected');
+    }
+  }
+
   // Inject a single "import from .md" button into a card's collapsible header.
   function injectTextImportButton(btnId, titleSub, label, friendlyName) {
     if (document.getElementById(btnId)) return;
@@ -943,6 +1417,7 @@
 
   // ---------------------- observe SPA navigation --------------------------
   const tick = () => {
+    if (busy) return; // don't mutate the DOM while we're scripting the page
     if (!location.pathname.includes('/annotator/tasks/')) return;
     try {
       injectButton();
@@ -955,9 +1430,13 @@
       injectTextImportButton(
         'golden-import-btn',
         CONFIG.goldenTitleIncludes,
-        '⤓ Import Golden',
+        '⤓ Import Golden Answer',
         'Golden Answer'
       );
+      injectVerifierCopyControl();
+      syncReviewTask();
+      REVIEW_PANELS.forEach(injectReviewControls);
+      injectQcFeedbackCopy();
     } catch (e) {
       /* ignore */
     }

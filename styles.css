@@ -16,6 +16,91 @@
 .rubric-action-btn:hover { background: rgba(99, 102, 241, 0.22); }
 .rubric-action-btn:disabled { opacity: 0.5; cursor: default; }
 
+/* split copy button + dropdown */
+.rubric-copy-wrap { position: relative; display: inline-flex; }
+.rubric-copy-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.rubric-copy-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 5px 7px;
+}
+.rubric-copy-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 2147483647;
+  min-width: 160px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.rubric-copy-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.rubric-copy-item:hover { background: #1e293b; }
+.rubric-copy-sep {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  padding: 6px 8px 2px;
+  margin-top: 2px;
+}
+.rubric-copy-sep:first-child { margin-top: 0; }
+
+/* rubric review score badge + result tint */
+.rubric-score-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.rubric-score-badge.rs-score-red {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #dc2626;
+}
+.rubric-score-badge.rs-score-yellow {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.6);
+  color: #b45309;
+}
+.rubric-score-badge.rs-score-green {
+  background: rgba(74, 222, 128, 0.2);
+  border-color: rgba(74, 222, 128, 0.6);
+  color: #16a34a;
+}
+pre.rs-score-red {
+  background: rgba(248, 113, 113, 0.14) !important;
+  border-radius: 6px;
+}
+pre.rs-score-yellow {
+  background: rgba(251, 191, 36, 0.16) !important;
+  border-radius: 6px;
+}
+pre.rs-score-green {
+  background: rgba(74, 222, 128, 0.16) !important;
+  border-radius: 6px;
+}
+
 #rubric-sync-toast {
   position: fixed;
   right: 16px;
