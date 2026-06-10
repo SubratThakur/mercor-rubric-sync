@@ -85,6 +85,25 @@
     }
   }
 
+  // Write `payload` to a FileSystemFileHandle, always releasing the lock. If
+  // any step fails we abort() the writable — otherwise a half-open writable
+  // keeps a .crswap lock on the file, which makes it show up DISABLED in the
+  // next file picker until the lock eventually clears.
+  async function writeToHandle(handle, payload) {
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(payload);
+      await writable.close();
+    } catch (e) {
+      try {
+        await writable.abort();
+      } catch (_) {
+        /* already closed/errored */
+      }
+      throw e;
+    }
+  }
+
   // ------------------------- React-safe value setter ----------------------
   function setNativeValue(el, value) {
     const proto =
@@ -574,9 +593,7 @@
     let manualPending = false;
     if (fileHandle) {
       try {
-        const writable = await fileHandle.createWritable();
-        await writable.write(payload);
-        await writable.close();
+        await writeToHandle(fileHandle, payload);
         toast('✔ JSON file written back with synced ids.', 'rs-row-ok');
       } catch (e) {
         toast('! write-back failed: ' + e.message, 'rs-row-err');
@@ -648,9 +665,7 @@
           suggestedName: 'rubric.json',
           types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
         });
-        const w = await handle.createWritable();
-        await w.write(payload);
-        await w.close();
+        await writeToHandle(handle, payload);
         toast('✔ Rubric exported.', 'rs-row-ok');
         scheduleAutoClose(5000);
       } else {
@@ -953,6 +968,14 @@
       // <24 red, 24 yellow, 25 green.
       tier: (s) => (s < 24 ? 'red' : s < 25 ? 'yellow' : 'green'),
     },
+    {
+      key: 'prompt-review',
+      title: 'prompt review',
+      friendly: 'Prompt Review',
+      max: 8,
+      // <7 red, 7 yellow, 8 green.
+      tier: (s) => (s < 7 ? 'red' : s < 8 ? 'yellow' : 'green'),
+    },
   ];
 
   // Last-seen output per panel, so the score badge + Copy button persist even
@@ -1048,6 +1071,47 @@
     }
   }
 
+  // ------------------- copy Model response prose -------------------------
+  // The Model response preview is a bordered .bg-muted/30 box containing a
+  // small label <p> and a rendered-markdown .prose block.
+  function getResponsePreview() {
+    const block = [...document.querySelectorAll('.rounded-md.border')].find(
+      (b) => /bg-muted/.test(b.className) && b.querySelector('.prose')
+    );
+    if (!block) return null;
+    return { block, prose: block.querySelector('.prose') };
+  }
+
+  async function copyModelResponse() {
+    let found = getResponsePreview();
+    if (!found) {
+      toast('! no Model response found', 'rs-row-warn');
+      return;
+    }
+    // Expand first if it's truncated ("Show more"), so we copy the full text.
+    const more = [...found.block.querySelectorAll('button')].find((b) =>
+      /show more/.test(norm(b.textContent))
+    );
+    if (more) {
+      more.click();
+      await sleep(CONFIG.stepDelay);
+      found = getResponsePreview() || found;
+    }
+    const prose = found.prose;
+    const text = (prose.innerText || prose.textContent || '').trim();
+    if (!text) {
+      toast('! Model response is empty', 'rs-row-warn');
+      return;
+    }
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      toast('✔ Copied Model response.', 'rs-row-ok');
+      scheduleAutoClose(5000);
+    } else {
+      toast('! clipboard copy failed', 'rs-row-err');
+    }
+  }
+
   // If automatic write-back fails (e.g. activation expired), give the user a
   // button to save with a fresh click, plus a plain download fallback.
   function offerManualSave(handle, payload) {
@@ -1068,9 +1132,7 @@
             suggestedName: 'rubric.json',
             types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
           }));
-        const w = await h.createWritable();
-        await w.write(payload);
-        await w.close();
+        await writeToHandle(h, payload);
         toast('✔ Saved.', 'rs-row-ok');
       } catch (e) {
         toast('! save failed: ' + e.message, 'rs-row-err');
@@ -1401,6 +1463,25 @@
     }
   }
 
+  // Inject an icon Copy button into the Model response preview block (top-right).
+  function injectModelResponseCopy() {
+    if (document.getElementById('model-response-copy-btn')) return;
+    const found = getResponsePreview();
+    if (!found) return;
+    const { block } = found;
+    if (getComputedStyle(block).position === 'static') {
+      block.style.position = 'relative';
+    }
+    const btn = makeIconCopyButton(
+      'model-response-copy-btn',
+      'Copy the Model response',
+      copyModelResponse
+    );
+    btn.classList.add('rubric-abs-copy');
+    block.appendChild(btn);
+    LOG('model response copy button injected');
+  }
+
   // Inject a single "import from .md" button into a card's collapsible header.
   function injectTextImportButton(btnId, titleSub, label, friendlyName) {
     if (document.getElementById(btnId)) return;
@@ -1437,6 +1518,7 @@
       syncReviewTask();
       REVIEW_PANELS.forEach(injectReviewControls);
       injectQcFeedbackCopy();
+      injectModelResponseCopy();
     } catch (e) {
       /* ignore */
     }

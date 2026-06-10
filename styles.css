@@ -61,6 +61,15 @@
 }
 .rubric-copy-sep:first-child { margin-top: 0; }
 
+/* absolutely-positioned copy icon (Model response preview) */
+.rubric-abs-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  background: rgba(127, 127, 127, 0.12);
+}
+
 /* rubric review score badge + result tint */
 .rubric-score-badge {
   display: inline-flex;
