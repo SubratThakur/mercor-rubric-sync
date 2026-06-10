@@ -1,0 +1,32 @@
+content.js
+  s_1ad261199a34eb::t_bc2dddd26f9de9 971-978
+  s_1ad261199a34eb::t_41be20c8a4c39b 1074-1114
+  s_1ad261199a34eb::t_7423a102c86dcf 1521
+  s_1ad261199a34eb::t_429946bbea5774 1135
+  s_1ad261199a34eb::t_79ffe117a3e179 596
+  s_1ad261199a34eb::t_facdab1f4fb3eb 668
+  s_1ad261199a34eb::t_40b1290f1d0386 88-106
+  s_1ad261199a34eb::t_e2adada98f979b 1466-1484
+README.md
+  s_1ad261199a34eb::t_780b8199f7ad72 38-40
+  s_1ad261199a34eb::t_f26f01d862e779 22-23
+  s_1ad261199a34eb::t_6a47d018e53cdc 31
+styles.css
+  s_1ad261199a34eb::t_8b797c0ad7f5b4 64-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9531d284fcbc9e47ac256b410b771a744ee9abe8",
+  "prompts": {},
+  "sessions": {
+    "s_1ad261199a34eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a631b210-3074-4808-bb8b-923adbf1ecdb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Subrat Thakur <sthakur@makenotion.com>"
+    }
+  }
+}
