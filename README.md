@@ -14,8 +14,25 @@ It adds buttons to the Build Rubric, Prompt, and Golden Answer sections:
     (add / update / delete), then writes the file back so it mirrors the browser.
 - *Step 1 · Write Prompt* header → **⤓ Import Prompt** — loads a `.md`/`.txt`
   file into the Prompt textarea.
-- *Step 2 · Write Golden Answer* header → **⤓ Import Golden** — loads a
+- *Step 2 · Write Golden Answer* header → **⤓ Import Golden Answer** — loads a
   `.md`/`.txt` file into the Golden Answer textarea.
+- *Verifier Judge Results* header → a **copy icon** button that copies the
+  currently open tab's verifier results (id, status, weight, score, criterion,
+  explanation) to the clipboard as JSON.
+- *Rubric Review* and *Golden Answer Review* panel headers (next to **Run**) →
+  a **copy icon** button (styled like Studio's native copy buttons) — copies
+  that panel's grading output (the `<pre>` text, including `FINAL_SCORE`) to the
+  clipboard as plain text. The button appears only when a result is present. When the output has a `FINAL_SCORE`, a colored
+  **Score: N/max** badge appears in the header and the result area is tinted by
+  tier:
+  - *Rubric Review* (max 40): **red** (< 35), **yellow** (35–38), **green** (39–40).
+  - *Golden Answer Review* (max 25): **red** (< 24), **yellow** (24), **green** (25).
+
+  The score badge and copy icon stay in the header even when the panel is
+  collapsed (the last result is cached per task and cleared on navigation), so
+  you can read the score and copy without re-expanding.
+- *QC Feedback* header → a **copy icon** button that copies the reviewer
+  feedback text. Cached per task, so it works even when the panel is collapsed.
 
 Prompt/Golden imports fill the field via React's native setter (so changes
 register); review and **Save Changes** yourself.
